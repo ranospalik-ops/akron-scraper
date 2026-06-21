@@ -43,7 +43,10 @@ jobs:
           if [ -n "$(git status --porcelain seen_deals.csv)" ]; then
             git add seen_deals.csv
             git commit -m "Update seen deals [skip ci]"
-            git push
+            # Pull any remote changes first so the push is never behind (fixes
+            # 'fetch first' rejection), then push.
+            git pull --rebase origin main || true
+            git push origin main
           else
             echo "No change to seen_deals.csv"
           fi
