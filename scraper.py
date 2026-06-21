@@ -22,12 +22,10 @@ from datetime import datetime
 # CONFIG  — non-secret settings live here; secrets come from env
 # ─────────────────────────────────────────────────────────────
 
-# Twilio creds are read from environment variables (GitHub Secrets),
-# never hard-coded. See setup guide.
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID", "")
-TWILIO_AUTH_TOKEN  = os.environ.get("TWILIO_AUTH_TOKEN", "")
-TWILIO_FROM        = os.environ.get("TWILIO_FROM", "")   # e.g. +13305551234 (your Twilio #)
-YOUR_NUMBER        = os.environ.get("YOUR_NUMBER", "")   # e.g. +972501234567 (your mobile)
+# Telegram credentials are read from environment variables (GitHub Secrets),
+# never hard-coded. See setup guide for how to get these two values.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")  # from @BotFather
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")    # your chat id with the bot
 
 # Akron, OH Redfin region id (verified). region_type=6 == city.
 AKRON_REGION_ID = "30808"
@@ -161,26 +159,31 @@ def save_seen(seen):
 
 
 # ─────────────────────────────────────────────────────────────
-# SMS
+# Telegram
 # ─────────────────────────────────────────────────────────────
-def send_sms(body):
-    if not all([TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, YOUR_NUMBER]):
-        log.error("Twilio env vars missing — cannot send SMS. (Printing instead.)")
+def send_telegram(body):
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        log.error("Telegram env vars missing — cannot send. (Printing instead.)")
         log.info("MESSAGE WOULD BE:\n" + body)
         return False
 
-    # SMS segments at ~160 chars; keep it tight so it doesn't fragment/fail.
-    if len(body) > 600:
-        body = body[:590] + "…"
+    # Telegram allows up to 4096 chars per message — plenty, no tight cap needed.
+    if len(body) > 4000:
+        body = body[:3990] + "…"
 
-    from twilio.rest import Client
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": body,
+        "disable_web_page_preview": True,
+    }
     try:
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        msg = client.messages.create(body=body, from_=TWILIO_FROM, to=YOUR_NUMBER)
-        log.info(f"SMS sent, sid={msg.sid}")
+        r = requests.post(url, json=payload, timeout=30)
+        r.raise_for_status()
+        log.info("Telegram message sent.")
         return True
-    except Exception as e:
-        log.error(f"Twilio send failed: {e}")
+    except requests.RequestException as e:
+        log.error(f"Telegram send failed: {e}")
         return False
 
 
@@ -240,15 +243,19 @@ def run():
 
     log.info(f"{len(deals)} new qualifying deal(s).")
 
-    # Build a terse SMS — top 3 only to stay short
-    today = datetime.now().strftime("%m/%d")
-    lines = [f"Akron Deals {today} — {len(deals)} new"]
-    for i, d in enumerate(deals[:3], 1):
-        lines.append(f"{i}) {d['addr']} ${d['price']//1000}k | {d['coc']}% {d['verdict']}")
+    # Telegram allows long messages — show top 5 with cash flow.
+    today = datetime.now().strftime("%b %d")
+    lines = [f"🏠 Akron Deals — {today} ({len(deals)} new)", ""]
+    for i, d in enumerate(deals[:5], 1):
+        lines.append(f"{i}) {d['addr']}")
+        lines.append(f"   ${d['price']:,} | {d['coc']}% CoC | ${d['cf']}/mo | {d['verdict']}")
         if d["url"]:
             lines.append(f"   {d['url']}")
-    body = "\n".join(lines)
-    ok = send_sms(body)
+        lines.append("")
+    if len(deals) > 5:
+        lines.append(f"+ {len(deals) - 5} more (check Redfin)")
+    body = "\n".join(lines).rstrip()
+    ok = send_telegram(body)
     return ok
 
 
