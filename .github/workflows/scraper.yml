@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write           # needed so the run can commit seen_deals.csv back
 
+# Prevent two runs from pushing at the same time (a cause of the rejection)
+concurrency:
+  group: akron-scraper
+  cancel-in-progress: false
+
 jobs:
   scrape:
     runs-on: ubuntu-latest
@@ -16,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so rebase/push works cleanly
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,13 +47,32 @@ jobs:
         run: |
           git config user.name  "deal-scraper-bot"
           git config user.email "bot@users.noreply.github.com"
-          if [ -n "$(git status --porcelain seen_deals.csv)" ]; then
-            git add seen_deals.csv
-            git commit -m "Update seen deals [skip ci]"
-            # Pull any remote changes first so the push is never behind (fixes
-            # 'fetch first' rejection), then push.
-            git pull --rebase origin main || true
-            git push origin main
-          else
+
+          # Nothing changed? Skip cleanly.
+          if [ -z "$(git status --porcelain seen_deals.csv)" ]; then
             echo "No change to seen_deals.csv"
+            exit 0
           fi
+
+          # Stash our one changed file, sync hard to the latest remote main,
+          # then re-apply. This can NEVER be 'behind', so the push always
+          # fast-forwards. Retry once in case of a concurrent push.
+          git add seen_deals.csv
+          git stash
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          git stash pop || true
+          git add seen_deals.csv
+          git commit -m "Update seen deals [skip ci]" || { echo "nothing to commit"; exit 0; }
+
+          for i in 1 2 3; do
+            if git push origin main; then
+              echo "pushed"; exit 0
+            fi
+            echo "push failed, syncing and retrying ($i)..."
+            git fetch origin main
+            git rebase origin/main || git rebase --abort
+          done
+          echo "could not push after retries"
+          exit 1
