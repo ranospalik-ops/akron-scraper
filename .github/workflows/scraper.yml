@@ -23,14 +23,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests twilio
+        run: pip install requests
 
       - name: Run scraper
         env:
-          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
-          TWILIO_AUTH_TOKEN:  ${{ secrets.TWILIO_AUTH_TOKEN }}
-          TWILIO_FROM:        ${{ secrets.TWILIO_FROM }}
-          YOUR_NUMBER:        ${{ secrets.YOUR_NUMBER }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scraper.py
 
       # Commit the updated seen-deals file back to the repo.
